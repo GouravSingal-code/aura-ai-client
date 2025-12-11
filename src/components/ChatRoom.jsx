@@ -9,7 +9,8 @@ const ChatRoom = ({ username, room, onLeave }) => {
     useEffect(() => {
         // Connect to WebSocket
         // Note: In production, use an environment variable for the backend URL
-        ws.current = new WebSocket(`ws://localhost:8000/ws/${room}/${username}`);
+        // WebSocket not used - using REST API instead
+        // ws.current = new WebSocket(`wss://aura-ai-997596012968.us-central1.run.app/ws/${room}/${username}`);
 
         ws.current.onopen = () => {
             console.log('Connected to WebSocket');

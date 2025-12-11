@@ -64,8 +64,8 @@
  * ============================================================================
  */
 
-// API Base URL - Update this to match your backend server
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// API Base URL - Production endpoint
+const API_BASE_URL = 'https://aura-ai-997596012968.us-central1.run.app';
 
 /**
  * Convert S3 URL to backend proxy URL (avoids CORS issues)
