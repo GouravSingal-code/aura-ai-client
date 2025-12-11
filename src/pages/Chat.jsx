@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Send, Plus, MessageSquare, MoreVertical, User, Bot, ArrowLeft, Heart } from 'lucide-react';
+import { Plus, MessageSquare, MoreVertical, User, Bot, ArrowLeft, Heart, Mic, MicOff } from 'lucide-react';
 import { createChat, getChats, sendChatMessage, likeImage } from '../services/api';
+import { textToSpeech, playAudio } from '../services/elevenlabs';
 
 const Chat = () => {
     const [user, setUser] = useState(null);
     const [chats, setChats] = useState([]);
     const [activeChat, setActiveChat] = useState(null);
     const [messages, setMessages] = useState([]);
-    const [input, setInput] = useState('');
     const [isSending, setIsSending] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
 
     const messagesEndRef = useRef(null);
+    const recognitionRef = useRef(null);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -52,6 +54,15 @@ const Chat = () => {
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (recognitionRef.current) {
+                recognitionRef.current.stop();
+            }
+        };
+    }, []);
 
     const fetchChatsWithUserId = async (user_id) => {
         if (!user_id) {
@@ -121,11 +132,82 @@ const Chat = () => {
         }
     };
 
-    // No WebSocket connection function needed - using REST API
+    // Audio recording functions using Web Speech API
+    const startRecording = async () => {
+        try {
+            // Check if Web Speech API is available
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+                return;
+            }
 
-    const sendMessage = async (e) => {
-        e.preventDefault();
-        if (!input.trim() || isSending) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SpeechRecognition();
+            
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            let finalTranscript = '';
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                // Show interim results in console for debugging (no UI display needed)
+                if (interimTranscript) {
+                    console.log('Interim transcript:', finalTranscript + interimTranscript);
+                }
+            };
+
+            recognition.onend = async () => {
+                setIsRecording(false);
+                const transcribedText = finalTranscript.trim();
+                
+                if (transcribedText) {
+                    console.log('🎤 Transcribed text:', transcribedText);
+                    // Automatically send the message
+                    await sendMessageFromText(transcribedText);
+                } else {
+                    alert('No speech detected. Please try again.');
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                setIsRecording(false);
+                if (event.error === 'no-speech') {
+                    alert('No speech detected. Please try again.');
+                } else {
+                    alert(`Speech recognition error: ${event.error}`);
+                }
+            };
+
+            recognitionRef.current = recognition;
+            recognition.start();
+            setIsRecording(true);
+        } catch (error) {
+            console.error('Failed to start recording:', error);
+            alert(`Microphone access denied or not available: ${error.message}`);
+        }
+    };
+
+    const stopRecording = () => {
+        if (recognitionRef.current) {
+            recognitionRef.current.stop();
+            setIsRecording(false);
+        }
+    };
+
+    // Helper function to send message from text (used by both text input and audio)
+    const sendMessageFromText = async (messageText) => {
+        if (!messageText.trim() || isSending) {
             return;
         }
 
@@ -134,13 +216,11 @@ const Chat = () => {
             return;
         }
 
-        const messageText = input.trim();
         console.log('📤 Sending message:', messageText);
         
         // Add user message to UI immediately
         const newMsg = { role: 'user', content: messageText };
         setMessages(prev => [...prev, newMsg]);
-        setInput('');
         setIsSending(true);
 
         try {
@@ -152,18 +232,28 @@ const Chat = () => {
             const response = await sendChatMessage(messageText, userId, threadId);
             console.log('📨 Received response:', response);
 
-            // Add assistant response to messages with ranked_products (or styled_products as fallback)
+            // Add assistant response to messages
             if (response.response) {
-                // Prioritize ranked_products, fallback to styled_products for backward compatibility
                 const products = response.ranked_products || response.styled_products || null;
-                setMessages(prev => [...prev, { 
+                const assistantMessage = { 
                     role: 'assistant', 
                     content: response.response,
                     ranked_products: response.ranked_products || null,
-                    styled_products: response.styled_products || null,  // Keep for backward compatibility
-                    products: products,  // Unified products field (ranked_products prioritized)
+                    styled_products: response.styled_products || null,
+                    products: products,
                     merged_images: response.merged_images || null
-                }]);
+                };
+                
+                setMessages(prev => [...prev, assistantMessage]);
+
+                // Convert response text to audio and play it
+                try {
+                    const audioBlob = await textToSpeech(response.response);
+                    await playAudio(audioBlob);
+                } catch (audioError) {
+                    console.error('Text-to-speech error:', audioError);
+                    // Don't fail the whole request if audio fails
+                }
             }
 
             // Refresh chats to get updated messages
@@ -180,7 +270,6 @@ const Chat = () => {
                     role: 'assistant', 
                     content: `Please upload at least one photo in your dashboard before starting a chat. This helps us personalize product recommendations for you.` 
                 }]);
-                // Optionally redirect to dashboard after a delay
                 setTimeout(() => {
                     navigate('/dashboard');
                 }, 3000);
@@ -194,6 +283,8 @@ const Chat = () => {
             setIsSending(false);
         }
     };
+
+    // Text input removed - only audio input is available
 
     const handleLikeImage = async (imageId) => {
         if (!user?.username) return;
@@ -435,27 +526,46 @@ const Chat = () => {
                     <div ref={messagesEndRef} />
                 </div>
 
-                {/* Input */}
+                {/* Audio Input Only */}
                 <div className="p-6 bg-black/50 backdrop-blur-xl border-t border-white/10 z-10">
-                    <form onSubmit={sendMessage} className="relative max-w-4xl mx-auto flex items-center gap-2">
-                        <div className="relative flex-1">
-                            <input
-                                type="text"
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                placeholder={isSending ? "Sending message..." : "Ask anything..."}
-                                disabled={isSending}
-                                className="w-full pl-6 pr-14 py-4 bg-zinc-900/50 border border-white/10 rounded-2xl focus:outline-none focus:border-purple-500/50 focus:bg-zinc-900 transition-all text-white placeholder:text-zinc-600 disabled:opacity-50"
-                            />
-                        </div>
+                    <div className="relative max-w-4xl mx-auto flex flex-col items-center gap-4">
+                        {/* Audio Recording Button - Large and Centered */}
                         <button
-                            type="submit"
-                            disabled={!input.trim() || isSending}
-                            className="p-4 bg-purple-600 rounded-2xl text-white hover:bg-purple-700 disabled:opacity-50 disabled:hover:bg-purple-600 transition-all"
+                            type="button"
+                            onClick={isRecording ? stopRecording : startRecording}
+                            disabled={isSending}
+                            className={`p-6 rounded-full transition-all ${
+                                isRecording 
+                                    ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse scale-110' 
+                                    : 'bg-purple-600 hover:bg-purple-700 text-white'
+                            } disabled:opacity-50 disabled:hover:bg-purple-600`}
+                            title={isRecording ? "Stop recording" : "Start voice recording"}
                         >
-                            <Send className="w-5 h-5" />
+                            {isRecording ? (
+                                <MicOff className="w-8 h-8" />
+                            ) : (
+                                <Mic className="w-8 h-8" />
+                            )}
                         </button>
-                    </form>
+                        
+                        {isRecording && (
+                            <div className="flex items-center gap-2 text-red-400 text-sm">
+                                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                                <span>Recording... Click microphone again to stop and send</span>
+                            </div>
+                        )}
+                        {isSending && (
+                            <div className="flex items-center gap-2 text-purple-400 text-sm">
+                                <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
+                                <span>Sending message...</span>
+                            </div>
+                        )}
+                        {!isRecording && !isSending && (
+                            <p className="text-xs text-zinc-500 text-center">
+                                Click the microphone to speak your message
+                            </p>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
