@@ -23,6 +23,16 @@ const Chat = () => {
         }
         const parsedUser = JSON.parse(storedUser);
         setUser(parsedUser);
+        
+        // Check if user has photos before allowing chat
+        const photoUrls = parsedUser.profile?.photo_urls;
+        if (!photoUrls || (Array.isArray(photoUrls) && photoUrls.length === 0)) {
+            // Redirect to dashboard if no photos
+            console.warn('⚠️ User has no photos. Redirecting to dashboard.');
+            navigate('/dashboard');
+            return;
+        }
+        
         // Fetch chats immediately with the parsed user (don't wait for state update)
         if (parsedUser?.user_id) {
             const userId = parsedUser.user_id || `user_${parsedUser.username}`;
@@ -142,12 +152,16 @@ const Chat = () => {
             const response = await sendChatMessage(messageText, userId, threadId);
             console.log('📨 Received response:', response);
 
-            // Add assistant response to messages with styled products if available
+            // Add assistant response to messages with ranked_products (or styled_products as fallback)
             if (response.response) {
+                // Prioritize ranked_products, fallback to styled_products for backward compatibility
+                const products = response.ranked_products || response.styled_products || null;
                 setMessages(prev => [...prev, { 
                     role: 'assistant', 
                     content: response.response,
-                    styled_products: response.styled_products || null,
+                    ranked_products: response.ranked_products || null,
+                    styled_products: response.styled_products || null,  // Keep for backward compatibility
+                    products: products,  // Unified products field (ranked_products prioritized)
                     merged_images: response.merged_images || null
                 }]);
             }
@@ -159,10 +173,23 @@ const Chat = () => {
             }
         } catch (error) {
             console.error('Error sending message:', error);
-            setMessages(prev => [...prev, { 
-                role: 'assistant', 
-                content: `Error: ${error.message || 'Failed to send message. Please try again.'}` 
-            }]);
+            
+            // Handle photo requirement error
+            if (error.message && error.message.includes('upload at least one photo')) {
+                setMessages(prev => [...prev, { 
+                    role: 'assistant', 
+                    content: `Please upload at least one photo in your dashboard before starting a chat. This helps us personalize product recommendations for you.` 
+                }]);
+                // Optionally redirect to dashboard after a delay
+                setTimeout(() => {
+                    navigate('/dashboard');
+                }, 3000);
+            } else {
+                setMessages(prev => [...prev, { 
+                    role: 'assistant', 
+                    content: `Error: ${error.message || 'Failed to send message. Please try again.'}` 
+                }]);
+            }
         } finally {
             setIsSending(false);
         }
@@ -312,10 +339,12 @@ const Chat = () => {
                             >
                                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                                     
-                                    {/* Display styled products if available */}
-                                    {msg.styled_products && msg.styled_products.length > 0 && (
+                                    {/* Display ranked_products (prioritized) or styled_products (fallback) */}
+                                    {((msg.ranked_products && msg.ranked_products.length > 0) || 
+                                      (msg.styled_products && msg.styled_products.length > 0) ||
+                                      (msg.products && msg.products.length > 0)) && (
                                         <div className="mt-4 space-y-4">
-                                            {msg.styled_products.map((product, productIdx) => (
+                                            {(msg.ranked_products || msg.products || msg.styled_products).map((product, productIdx) => (
                                                 <div 
                                                     key={product.id || productIdx}
                                                     className="bg-zinc-800/50 border border-white/10 rounded-xl p-4 hover:border-purple-500/50 transition-all"

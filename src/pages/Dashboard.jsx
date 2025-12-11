@@ -216,12 +216,22 @@ const Dashboard = () => {
                         <span className="text-xl font-bold tracking-tight">Aura AI</span>
                     </div>
                     <div className="flex items-center gap-4">
-                        <button
-                            onClick={() => navigate('/chat')}
-                            className="px-4 py-2 text-sm font-medium transition-colors rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white"
-                        >
-                            Go to Chat
-                        </button>
+                        {userPhotos && userPhotos.length > 0 ? (
+                            <button
+                                onClick={() => navigate('/chat')}
+                                className="px-4 py-2 text-sm font-medium transition-colors rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white"
+                            >
+                                Go to Chat
+                            </button>
+                        ) : (
+                            <button
+                                disabled
+                                className="px-4 py-2 text-sm font-medium rounded-lg text-zinc-600 cursor-not-allowed opacity-50"
+                                title="Please upload a photo first"
+                            >
+                                Go to Chat
+                            </button>
+                        )}
                         <button
                             onClick={() => {
                                 localStorage.removeItem('user');
@@ -236,6 +246,27 @@ const Dashboard = () => {
             </nav>
 
             <main className="px-6 py-12 mx-auto max-w-7xl">
+                {/* Photo Upload Requirement Banner */}
+                {(!userPhotos || userPhotos.length === 0) && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl"
+                    >
+                        <div className="flex items-center gap-3">
+                            <ImageIcon className="w-5 h-5 text-yellow-400" />
+                            <div>
+                                <p className="text-sm font-medium text-yellow-400">
+                                    Photo Required
+                                </p>
+                                <p className="text-xs text-yellow-400/80 mt-1">
+                                    Please upload at least one photo to start chatting. Your photo helps us personalize product recommendations for you.
+                                </p>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+                
                 <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
 
                     {/* User Profile Card */}
